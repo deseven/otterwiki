@@ -124,11 +124,29 @@ def auto_url(filename, revision=None, _external=False):
     arr = split_path(filename)
     if filename.endswith(".md"):
         # page
+        pagepath = filename[:-3] if filename.endswith('.md') else filename
+
+        # Try to get display title from page title manager for display name
+        from otterwiki.page_titles import get_page_title_manager
+
+        title_manager = get_page_title_manager()
+
+        if title_manager and title_manager.enabled:
+            # When enabled, use display title for name but filename-based path for URL
+            display_name = title_manager.get_display_title(pagepath, full=True)
+            url_path = get_pagename(
+                filename, full=True
+            )  # Always filename-based for URLs
+        else:
+            # When disabled, use original behavior for both name and URL
+            display_name = get_pagename(filename, full=True)
+            url_path = display_name  # Same as display name
+
         return (
-            get_pagename(filename, full=True),
+            display_name,  # Display name (can be from header when enabled)
             url_for(
                 "view",
-                path=get_pagename(filename, full=True),
+                path=url_path,  # URL path (filename-based when enabled, original when disabled)
                 revision=revision,
                 _external=_external,
             ),

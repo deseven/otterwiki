@@ -48,6 +48,7 @@ from otterwiki.renderer import pygments_render
 from otterwiki.server import app, app_renderer, db, storage
 from otterwiki.sidebar import SidebarMenu, SidebarPageIndex
 from otterwiki.pageindex import PageIndex
+from otterwiki.page_titles import get_page_title_manager
 from otterwiki.util import (
     empty,
     get_header,
@@ -365,13 +366,29 @@ class Page:
             self.exists = False
 
         if self.content is not None:
-            header = get_header(self.content)
-            self.pagename = get_pagename(
-                self.pagepath, full=False, header=header
-            )
-            self.pagename_full = get_pagename(
-                self.pagepath, full=True, header=header
-            )
+            # Get page title manager
+            title_manager = get_page_title_manager()
+
+            if title_manager and title_manager.enabled:
+                # Use page title manager for display names
+                self.pagename = title_manager.get_display_title(
+                    self.pagepath, full=False
+                )
+                self.pagename_full = title_manager.get_display_title(
+                    self.pagepath, full=True
+                )
+
+                # Update cache with current content (in case file was edited externally)
+                title_manager.update_page_title(self.pagepath, self.content)
+            else:
+                # Fall back to original behavior
+                header = get_header(self.content)
+                self.pagename = get_pagename(
+                    self.pagepath, full=False, header=header
+                )
+                self.pagename_full = get_pagename(
+                    self.pagepath, full=True, header=header
+                )
 
     def breadcrumbs(self):
         return get_breadcrumbs(self.pagepath)
@@ -476,20 +493,46 @@ class Page:
         )
         update_ftoc_cache(self.filename, ftoc=toc)
 
-        if len(toc) > 0:
-            # use first headline to overwrite pagename
-            self.pagename = get_pagename(
-                self.pagename,
-                full=False,
-                header=toc[0][3],
-            )
+        # Get page title manager
+        title_manager = get_page_title_manager()
 
-        try:
-            # set title to the first headline
-            title = toc[0][3]
-        except IndexError:
-            # use pagename as fallback
-            title = self.pagename
+        if title_manager and title_manager.enabled:
+            # Use cached title if available, otherwise use pagename
+            cached_title = title_manager.get_page_title(
+                self.pagepath, fallback_to_filename=False
+            )
+            if cached_title:
+                title = cached_title
+                self.pagename = title_manager.get_display_title(
+                    self.pagepath, full=False
+                )
+            else:
+                # Fall back to TOC-based title or pagename
+                if len(toc) > 0:
+                    title = toc[0][3]
+                    self.pagename = get_pagename(
+                        self.pagename,
+                        full=False,
+                        header=toc[0][3],
+                    )
+                else:
+                    title = self.pagename
+        else:
+            # Original behavior
+            if len(toc) > 0:
+                # use first headline to overwrite pagename
+                self.pagename = get_pagename(
+                    self.pagename,
+                    full=False,
+                    header=toc[0][3],
+                )
+
+            try:
+                # set title to the first headline
+                title = toc[0][3]
+            except IndexError:
+                # use pagename as fallback
+                title = self.pagename
         if self.revision is not None:
             title = "{} ({})".format(self.pagename, self.revision)
 
@@ -545,14 +588,25 @@ class Page:
         content_html, toc = app_renderer.markdown(
             content, cursor=cursor_line, page_url=self.page_view_url
         )
-        # update pagename from toc
-        if len(toc) > 0:
-            # use first headline to overwrite pagename
-            self.pagename = get_pagename(
-                self.pagename,
-                full=False,
-                header=toc[0][3],
+        # Get page title manager
+        title_manager = get_page_title_manager()
+
+        if title_manager and title_manager.enabled:
+            # Update cache with preview content
+            title_manager.update_page_title(self.pagepath, content)
+            # Use display title
+            self.pagename = title_manager.get_display_title(
+                self.pagepath, full=False
             )
+        else:
+            # Original behavior - update pagename from toc
+            if len(toc) > 0:
+                # use first headline to overwrite pagename
+                self.pagename = get_pagename(
+                    self.pagename,
+                    full=False,
+                    header=toc[0][3],
+                )
 
         # render toc into the html template
         toc_html = render_template(
@@ -666,6 +720,16 @@ class Page:
             message=commit,
             author=author,
         )
+
+        # Update page title cache after saving
+        title_manager = get_page_title_manager()
+        if title_manager and title_manager.enabled:
+            title_manager.update_page_title(self.pagepath, content)
+            # Update display name for toast message
+            self.pagename_full = title_manager.get_display_title(
+                self.pagepath, full=True
+            )
+
         if not changed:
             toast("Nothing changed.", "warning")
         else:
@@ -833,11 +897,27 @@ class Page:
                 # if not self.exists, do commit, since no md file will be renamed
                 no_commit=self.exists,
             )
+
+        # Update page title cache for rename operation
+        title_manager = get_page_title_manager()
+        if title_manager and title_manager.enabled:
+            # Remove old entry
+            title_manager.remove_page_title(self.pagepath)
+
         # rename page
         if self.exists:
             storage.rename(
                 self.filename, new_filename, message=message, author=author
             )
+
+            # Add new entry to cache after rename
+            if title_manager and title_manager.enabled:
+                new_pagepath = (
+                    new_pagename[:-3]
+                    if new_pagename.endswith('.md')
+                    else new_pagename
+                )
+                title_manager.update_page_title(new_pagepath)
 
     def handle_rename(self, new_pagename, message, author):
         if not has_permission("WRITE"):
@@ -914,6 +994,12 @@ class Page:
         if len(files) < 1:
             toast("Nothing to delete.")
             return redirect(url_for("view", path=self.pagepath))
+
+        # Remove from page title cache before deletion
+        title_manager = get_page_title_manager()
+        if title_manager and title_manager.enabled:
+            title_manager.remove_page_title(self.pagepath)
+
         storage.delete(
             files,
             message=message,

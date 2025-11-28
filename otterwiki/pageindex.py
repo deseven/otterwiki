@@ -25,6 +25,7 @@ from otterwiki.helper import (
 )
 from otterwiki.server import app, storage
 from otterwiki.sidebar import SidebarMenu, SidebarPageIndex
+from otterwiki.page_titles import get_page_title_manager
 from otterwiki.util import (
     get_page_directoryname,
     join_path,
@@ -119,35 +120,56 @@ class PageIndex:
                     )
                     page_indices.append(subdir_path)
             pagetoc = []
-            # default pagename is the pagename derived from the filename
-            pagename = get_pagename(
-                f,
-                full=False,
-            )
+
+            # Get page title manager
+            title_manager = get_page_title_manager()
+
+            if title_manager and title_manager.enabled:
+                # Use page title manager for display names
+                pagename = title_manager.get_display_title(f, full=False)
+                full_pagename = title_manager.get_display_title(f, full=True)
+            else:
+                # Original behavior - default pagename is the pagename derived from the filename
+                pagename = get_pagename(f, full=False)
+                full_pagename = get_pagename(f, full=True)
+
             ftoc = get_ftoc(f)
 
             # add headers to page toc
             # (4, '2 L <strong>bold</strong>', 1, '2 L bold', '2-l-bold')
             for i, header in enumerate(ftoc):
-                if i == 0 and len(pagetoc) == 0:
+                if (
+                    i == 0
+                    and len(pagetoc) == 0
+                    and not (title_manager and title_manager.enabled)
+                ):
+                    # Only overwrite pagename with header if not using title manager
                     # overwrite pagename with the first header found on the page as hint for upper/lower casing
                     pagename = get_pagename(
                         f,
                         full=False,
                         header=header[3],
                     )
+                    full_pagename = get_pagename(
+                        f, full=True, header=header[3]
+                    )
                 else:
+                    # For TOC entries (headers within pages), always use the page's URL path
+                    # The page URL should be determined by the same logic as the main page entry
+                    if title_manager and title_manager.enabled:
+                        # When title manager is enabled, use original filename-based path
+                        toc_url_path = get_pagename(f, full=True)
+                    else:
+                        # When disabled, use the full_pagename which includes header-based naming
+                        toc_url_path = full_pagename
+
                     pagetoc.append(
                         (
                             header[2],  # depth
                             header[3],  # title without formatting
                             url_for(
                                 "view",
-                                path=get_pagename(
-                                    f,
-                                    full=True,
-                                    header=pagename,
-                                ),
+                                path=toc_url_path,
                                 _anchor=header[4],
                             ),
                         )
@@ -163,13 +185,21 @@ class PageIndex:
                 if other.startswith(f[:-3] + "/"):
                     has_children = True
                     break
+            # Use appropriate path for URLs based on whether title manager is enabled
+            if title_manager and title_manager.enabled:
+                # When title manager is enabled, use original filename-based path for URLs
+                url_path = get_pagename(f, full=True)
+            else:
+                # When disabled, use the full_pagename (which includes header-based naming)
+                url_path = full_pagename
+
             self.toc[firstletter].append(
                 PageIndexEntry(
                     depth=page_depth - self.index_depth,
                     title=displayname,
                     url=url_for(
                         "view",
-                        path=get_pagename(f, full=True, header=pagename),
+                        path=url_path,
                     ),
                     toc=pagetoc,
                     has_children=has_children,

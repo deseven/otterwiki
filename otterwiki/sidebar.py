@@ -16,6 +16,7 @@ from otterwiki.util import (
 from otterwiki.helper import (
     get_pagename,
 )
+from otterwiki.page_titles import get_page_title_manager
 
 
 class SidebarMenu:
@@ -151,18 +152,38 @@ class SidebarPageIndex:
         ):
             return
         if parts[0] not in tree:
-            tree[parts[0]] = {
-                "children": OrderedDict(),
-                "path": get_pagename(
-                    join_path(prefix + parts),
+            # Get page title manager
+            title_manager = get_page_title_manager()
+            pagepath = join_path(prefix + parts)
+
+            if title_manager and title_manager.enabled:
+                # Use page title manager for display names, but keep original path for URLs
+                display_title_short = title_manager.get_display_title(
+                    pagepath, full=False
+                )
+                # Use original filename-based path for navigation when title manager is enabled
+                url_path = get_pagename(
+                    pagepath,
                     full=True,
                     header=header if len(parts) == 1 else None,
-                ),
-                "header": get_pagename(
-                    join_path(prefix + parts),
+                )
+            else:
+                # Fall back to original behavior - both display and URL use same logic
+                url_path = get_pagename(
+                    pagepath,
+                    full=True,
+                    header=header if len(parts) == 1 else None,
+                )
+                display_title_short = get_pagename(
+                    pagepath,
                     full=False,
                     header=header if len(parts) == 1 else None,
-                ),
+                )
+
+            tree[parts[0]] = {
+                "children": OrderedDict(),
+                "path": url_path,  # This is used for URL generation
+                "header": display_title_short,  # This is used for display
             }
         if len(parts) > 1:
             self.add_node(
@@ -200,7 +221,16 @@ class SidebarPageIndex:
                 entry = entry[:-3]
             self.filenames_and_header.append((entry, header))
             parts = split_path(entry)
-            self.add_node(self.tree, [], parts, header)
+
+            # For page title manager, we don't need to pass header since it will
+            # extract the title from the cache or file content
+            title_manager = get_page_title_manager()
+            if title_manager and title_manager.enabled:
+                # Let the title manager handle title extraction
+                self.add_node(self.tree, [], parts, None)
+            else:
+                # Original behavior with header
+                self.add_node(self.tree, [], parts, header)
         app.logger.debug(
             f"SidebarPageIndex.load({path}) reading entries, adding nodes took {timer() - t_start:.3f} seconds."
         )

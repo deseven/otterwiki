@@ -67,6 +67,7 @@ app.config.update(
     HTML_EXTRA_HEAD="",
     HTML_EXTRA_BODY="",
     LOG_LEVEL_WERKZEUG="INFO",
+    USE_PAGE_HEADER_AS_TITLE=False,
 )
 app.config.from_envvar("OTTERWIKI_SETTINGS", silent=True)
 
@@ -164,6 +165,7 @@ def update_app_config():
                 "SIDEBAR_MENUTREE_IGNORE_CASE",
                 "GIT_WEB_SERVER",
                 "HIDE_LOGO",
+                "USE_PAGE_HEADER_AS_TITLE",
             ] or item.name.upper().startswith("SIDEBAR_SHORTCUT_"):
                 item.value = item.value.lower() in ["true", "yes"]
             if item.name.upper() in ["MAIL_PORT"]:
@@ -191,6 +193,15 @@ update_app_config()
 #
 # initialize renderer
 app_renderer = OtterwikiRenderer(config=app.config)
+
+#
+# page title manager
+#
+from otterwiki.page_titles import init_page_title_manager
+
+# Pass app instance for logging
+app.config['_app_instance'] = app
+page_title_manager = init_page_title_manager(storage, app.config)
 
 
 #
