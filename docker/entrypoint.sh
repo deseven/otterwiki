@@ -58,6 +58,8 @@ sed -i "/worker_processes\s/c\worker_processes ${USE_NGINX_WORKER_PROCESSES};" /
 USE_STATIC_URL=${STATIC_URL:-'/static'}
 # Get the absolute path of the static files from the environment variable
 USE_STATIC_PATH=${STATIC_PATH:-'/app/otterwiki/static'}
+# Export it so the Python app can access it
+export USE_STATIC_PATH
 # Get the listen port for Nginx, default to 80
 USE_LISTEN_PORT=${LISTEN_PORT:-80}
 if [ "${USE_LISTEN_PORT}" != "8080" ]; then

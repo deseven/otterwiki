@@ -31,6 +31,11 @@ class SerializeError(ValueError):
 # initialize serializer
 _serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
 
+# determine static path once at startup
+_static_path = os.environ.get(
+    'USE_STATIC_PATH', os.path.join(app.root_path, 'static')
+)
+
 
 def serialize(str, salt=None):
     return _serializer.dumps(str, salt=salt)
@@ -368,9 +373,8 @@ def get_ftoc(filename, mtime=None):
 
 def load_custom_html(filename):
     try:
-        custom_file_path = os.path.join(
-            app.root_path, 'static', 'custom', filename
-        )
+        custom_file_path = os.path.join(_static_path, 'custom', filename)
+
         if os.path.exists(custom_file_path):
             with open(custom_file_path, 'r', encoding='utf-8') as f:
                 return f.read()
